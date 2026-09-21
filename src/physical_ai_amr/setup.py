@@ -26,7 +26,10 @@ setup(
     zip_safe=True,
     maintainer='user',
     maintainer_email='user@todo.todo',
-    description='Physical AI AMR package with a simple robot command publisher.',
+    description=(
+        'Physical AI AMR package with a Gazebo Harmonic differential-drive robot: '
+        'reactive patrol/obstacle avoidance with Nav2 goal handoff.'
+    ),
     license='Apache-2.0',
     extras_require={
         'test': [
