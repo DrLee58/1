@@ -122,18 +122,42 @@
     <origin xyz="${caster_x} 0 ${-(wheel_radius - caster_radius)}" rpy="0 0 0"/>
   </joint>
 
-  <!-- Low friction so the caster slides; drive wheels keep grip. -->
+  <!-- Gazebo Harmonic friction lives on collision/surface, not on the link. -->
   <gazebo reference="caster">
-    <mu>0.01</mu>
-    <mu2>0.01</mu2>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>0.01</mu>
+            <mu2>0.01</mu2>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
   </gazebo>
   <gazebo reference="left_wheel">
-    <mu>1.0</mu>
-    <mu2>1.0</mu2>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>1.0</mu2>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
   </gazebo>
   <gazebo reference="right_wheel">
-    <mu>1.0</mu>
-    <mu2>1.0</mu2>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>1.0</mu2>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
   </gazebo>
 
   <!-- Gazebo Harmonic (gz-sim) DiffDrive — not Gazebo Classic. -->
