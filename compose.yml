@@ -1,0 +1,10 @@
+services:
+  ros2:
+    build: .
+    container_name: physical_ai_ros2
+    network_mode: host
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
