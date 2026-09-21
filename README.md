@@ -1,5 +1,7 @@
 # physical_ai_ws
 
+[GitHub: DrLee58/1](https://github.com/DrLee58/1)
+
 ROS 2 Jazzy + Gazebo Harmonic(gz-sim)으로 만드는 차동구동 AMR(`physical_ai_amr`) 학습 프로젝트. macOS에서 Docker로 ROS 2를 돌리고, 시뮬레이션은 Docker 컨테이너 안에서 헤드리스로 실행한다.
 
 ## 요구 사항
