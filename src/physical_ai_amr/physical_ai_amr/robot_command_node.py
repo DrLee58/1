@@ -7,10 +7,11 @@ from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from std_msgs.msg import Empty
 
 
 class RobotCommandNode(Node):
-    """Patrols reactively by default; hands control to Nav2 for one-off goals.
+    """Patrols reactively by default; hands control to Nav2 for Nav2 goals.
 
     Publishing a PoseStamped on /go_to_pose pauses the reactive patrol and
     sends it to Nav2's navigate_to_pose action (see navigation.launch.py).
@@ -20,6 +21,10 @@ class RobotCommandNode(Node):
     origin, rather than the fixed backup+turn used for obstacles: a blind
     turn has no guarantee of aiming back inward, and in practice it can
     settle into a stable loop that oscillates right on the boundary forever.
+
+    Publishing an Empty on /start_waypoint_tour switches to cycling through
+    WAYPOINTS via Nav2 forever, instead of reactive patrolling; /stop_waypoint_tour
+    switches back.
     """
 
     FORWARD_SPEED = 0.3
@@ -38,6 +43,15 @@ class RobotCommandNode(Node):
     # it can fail instantly - without this, a failed patrol-edge return would
     # retry every odom message and spam the action server forever.
     NAV_RETRY_COOLDOWN = rclpy.duration.Duration(seconds=3.0)
+
+    # A loop around the obstacle_box, staying inside maps/patrol_world.yaml's
+    # [-6, 6] extent.
+    WAYPOINTS = [
+        (4.0, 4.0),
+        (4.0, -4.0),
+        (-4.0, -4.0),
+        (-4.0, 4.0),
+    ]
 
     def __init__(self):
         super().__init__('robot_command_node')
@@ -62,11 +76,27 @@ class RobotCommandNode(Node):
             10
         )
 
+        self.start_tour_subscription = self.create_subscription(
+            Empty,
+            '/start_waypoint_tour',
+            self.start_tour_callback,
+            10
+        )
+
+        self.stop_tour_subscription = self.create_subscription(
+            Empty,
+            '/stop_waypoint_tour',
+            self.stop_tour_callback,
+            10
+        )
+
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         self.avoiding_until = None
         self.navigating = False
         self.nav_retry_until = None
+        self.touring = False
+        self.waypoint_index = 0
 
         self.timer = self.create_timer(
             0.1,
@@ -90,6 +120,9 @@ class RobotCommandNode(Node):
             self.get_logger().info('Obstacle nearby, backing off and turning')
             return
 
+        if self.touring:
+            return
+
         if math.hypot(x, y) > self.PATROL_RADIUS:
             if self.nav_retry_until is not None and self.get_clock().now() < self.nav_retry_until:
                 return
@@ -100,7 +133,28 @@ class RobotCommandNode(Node):
             self.send_nav_goal(origin)
 
     def go_to_pose_callback(self, msg):
+        self.touring = False
         self.send_nav_goal(msg)
+
+    def start_tour_callback(self, _msg):
+        self.get_logger().info('Starting waypoint tour')
+        self.touring = True
+        self.waypoint_index = 0
+        self.nav_retry_until = None
+        self._send_current_waypoint()
+
+    def stop_tour_callback(self, _msg):
+        self.get_logger().info('Stopping waypoint tour, resuming patrol')
+        self.touring = False
+
+    def _send_current_waypoint(self):
+        x, y = self.WAYPOINTS[self.waypoint_index]
+        pose = PoseStamped()
+        pose.header.frame_id = 'map'
+        pose.pose.position.x = x
+        pose.pose.position.y = y
+        pose.pose.orientation.w = 1.0
+        self.send_nav_goal(pose)
 
     def send_nav_goal(self, pose_stamped):
         if self.navigating:
@@ -132,16 +186,23 @@ class RobotCommandNode(Node):
         result_future.add_done_callback(self.nav_result_callback)
 
     def nav_result_callback(self, future):
-        if future.result().status == GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().info('Nav2 goal finished, resuming patrol')
-            self.nav_retry_until = None
-        else:
+        self.navigating = False
+
+        if future.result().status != GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().warn(
                 f'Nav2 goal did not succeed (status={future.result().status}), '
                 f'resuming patrol after a cooldown'
             )
             self._on_nav_failure()
-        self.navigating = False
+            return
+
+        self.nav_retry_until = None
+        if self.touring:
+            self.waypoint_index = (self.waypoint_index + 1) % len(self.WAYPOINTS)
+            self.get_logger().info(f'Waypoint reached, heading to waypoint {self.waypoint_index}')
+            self._send_current_waypoint()
+        else:
+            self.get_logger().info('Nav2 goal finished, resuming patrol')
 
     def _on_nav_failure(self):
         # Don't just drive straight ahead while waiting to retry - that would
@@ -164,6 +225,11 @@ class RobotCommandNode(Node):
                 msg.angular.z = self.TURN_SPEED
                 self.publisher_.publish(msg)
                 return
+
+        if self.touring:
+            if self.nav_retry_until is None or self.get_clock().now() >= self.nav_retry_until:
+                self._send_current_waypoint()
+            return
 
         msg.linear.x = self.FORWARD_SPEED
         msg.angular.z = 0.0

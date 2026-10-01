@@ -60,6 +60,15 @@ ros2 topic pub --once /go_to_pose geometry_msgs/msg/PoseStamped \
   "{header: {frame_id: map}, pose: {position: {x: -3.0, y: -2.0, z: 0.0}, orientation: {w: 1.0}}}"
 ```
 
+`/start_waypoint_tour`(std_msgs/Empty)를 보내면 `WAYPOINTS`(장애물 주변을 도는 4개 지점)를 Nav2로 하나씩 끝없이 순회한다. `/stop_waypoint_tour`로 멈추고 순찰로 돌아간다. `/go_to_pose`를 보내도 순회는 중단된다.
+
+```bash
+ros2 topic pub --once /start_waypoint_tour std_msgs/msg/Empty '{}'
+ros2 topic pub --once /stop_waypoint_tour std_msgs/msg/Empty '{}'
+```
+
+Nav2 목표가 실패하면(예: 로봇이 지도 밖으로 나가 있는 등) 3초 쿨다운 동안 로컬 후진+회전으로 대기한 뒤 같은 목표를 재시도한다 — 실패할 때마다 즉시 재시도해서 액션 서버에 요청이 쏟아지는 걸 막기 위함이다.
+
 내부적으로 `robot_command_node`가 직접 `/cmd_vel`을 발행하는 것과 Nav2의 `controller_server`가 발행하는 것 중 하나만 활성화되도록 상태를 전환한다(순찰 중엔 Nav2 대기, 목표 이동 중엔 순찰 정지) — 두 발행자가 동시에 `/cmd_vel`을 놓고 싸우지 않는다.
 
 ## Nav2 스택만 따로 쓰기

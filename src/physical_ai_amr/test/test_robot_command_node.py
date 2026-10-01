@@ -6,6 +6,7 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
+from std_msgs.msg import Empty
 
 from physical_ai_amr.robot_command_node import RobotCommandNode
 
@@ -220,3 +221,113 @@ class TestNav2Handoff:
         assert node.navigating is False
         assert node.nav_retry_until is not None
         assert node.avoiding_until is not None
+
+
+class TestWaypointTour:
+
+    def test_start_tour_sends_first_waypoint(self, node):
+        fake_future = MagicMock()
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(
+                    node.nav_client, 'send_goal_async', return_value=fake_future
+                ) as send_mock:
+            node.start_tour_callback(Empty())
+
+        assert node.touring is True
+        assert node.waypoint_index == 0
+        goal = send_mock.call_args.args[0]
+        expected_x, expected_y = RobotCommandNode.WAYPOINTS[0]
+        assert goal.pose.pose.position.x == expected_x
+        assert goal.pose.pose.position.y == expected_y
+
+    def test_tour_advances_to_next_waypoint_on_success(self, node):
+        node.touring = True
+        node.waypoint_index = 0
+        node.navigating = True
+        future = MagicMock()
+        future.result.return_value = MagicMock(status=GoalStatus.STATUS_SUCCEEDED)
+        fake_future = MagicMock()
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(
+                    node.nav_client, 'send_goal_async', return_value=fake_future
+                ) as send_mock:
+            node.nav_result_callback(future)
+
+        assert node.waypoint_index == 1
+        goal = send_mock.call_args.args[0]
+        expected_x, expected_y = RobotCommandNode.WAYPOINTS[1]
+        assert goal.pose.pose.position.x == expected_x
+        assert goal.pose.pose.position.y == expected_y
+
+    def test_tour_wraps_around_after_last_waypoint(self, node):
+        node.touring = True
+        node.waypoint_index = len(RobotCommandNode.WAYPOINTS) - 1
+        node.navigating = True
+        future = MagicMock()
+        future.result.return_value = MagicMock(status=GoalStatus.STATUS_SUCCEEDED)
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(node.nav_client, 'send_goal_async', return_value=MagicMock()):
+            node.nav_result_callback(future)
+
+        assert node.waypoint_index == 0
+
+    def test_tour_failure_retries_same_waypoint_not_next(self, node):
+        node.touring = True
+        node.waypoint_index = 2
+        node.navigating = True
+        future = MagicMock()
+        future.result.return_value = MagicMock(status=GoalStatus.STATUS_ABORTED)
+
+        node.nav_result_callback(future)
+
+        assert node.waypoint_index == 2
+        assert node.touring is True
+        assert node.avoiding_until is not None
+
+    def test_stop_tour_resumes_patrol(self, node):
+        node.touring = True
+
+        node.stop_tour_callback(Empty())
+
+        assert node.touring is False
+
+    def test_go_to_pose_cancels_touring(self, node):
+        node.touring = True
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(node.nav_client, 'send_goal_async', return_value=MagicMock()):
+            node.go_to_pose_callback(PoseStamped())
+
+        assert node.touring is False
+
+    def test_patrol_edge_check_skipped_while_touring(self, node):
+        node.touring = True
+
+        with patch.object(node.nav_client, 'wait_for_server') as wait_mock:
+            node.odom_callback(make_odom(RobotCommandNode.PATROL_RADIUS + 10.0, 0.0))
+
+        wait_mock.assert_not_called()
+
+    def test_publish_command_sends_waypoint_when_touring_and_idle(self, node):
+        node.touring = True
+        fake_future = MagicMock()
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(
+                    node.nav_client, 'send_goal_async', return_value=fake_future
+                ) as send_mock:
+            node.publish_command()
+
+        send_mock.assert_called_once()
+
+    def test_publish_command_respects_retry_cooldown_while_touring(self, node):
+        node.touring = True
+        node.nav_retry_until = node.get_clock().now() + Duration(seconds=5.0)
+
+        with patch.object(node.nav_client, 'wait_for_server') as wait_mock:
+            node.publish_command()
+
+        wait_mock.assert_not_called()
