@@ -84,9 +84,19 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 python3 src/physical_ai_amr/maps/generate_map.py
 ```
 
+## 시각적으로 확인하기 (Foxglove)
+
+네이티브 Gazebo GUI는 안 되지만(아래 제약 참고), `foxglove_bridge`는 멀티캐스트가 아니라 일반 WebSocket(TCP)이라 문제없이 동작한다.
+
+```bash
+ros2 run foxglove_bridge foxglove_bridge
+```
+
+[Foxglove](https://foxglove.dev)(데스크톱 앱 또는 https://app.foxglove.dev )에서 "Open connection" → "Foxglove WebSocket" → `ws://localhost:8765`로 연결하면 된다. 3D 패널을 추가하고 `/robot_description`의 보이기(눈 아이콘)를 켜면 로봇이 실시간으로 움직이는 걸 볼 수 있다.
+
 ## 알려진 제약 (이 Docker 환경 한정)
 
-- **네이티브 Gazebo GUI 불가**: Docker Desktop이 만드는 vpnkit/utun 인터페이스가 gz-transport 멀티캐스트 디스커버리를 깨뜨려서 `scripts/mac/gz_server.sh` + `gz_gui.sh`로 macOS 네이티브 GUI를 띄워도 화면이 안 뜬다. 시각적 확인이 필요하면 `/odom`, `/cmd_vel` 등을 echo해서 검증한다.
+- **네이티브 Gazebo GUI 불가**: Docker Desktop이 만드는 vpnkit/utun 인터페이스가 gz-transport 멀티캐스트 디스커버리를 깨뜨려서 `scripts/mac/gz_server.sh` + `gz_gui.sh`로 macOS 네이티브 GUI를 띄워도 화면이 안 뜬다. 시각적 확인은 위 Foxglove 방법을 쓰거나 `/odom`, `/cmd_vel` 등을 echo해서 검증한다.
 - **라이다/카메라 불가**: 컨테이너에 GPU 렌더링 접근이 없어 `gpu_lidar` 센서가 렌더 스레드 초기화에서 무한 대기한다. `type="lidar"`는 이 gz-sim 버전 자체가 미지원.
 - **Contact(범퍼) 센서 불가**: 물리 충돌 자체는 되지만(확인함), contact 센서가 겹침 상황에서도 메시지를 발행하지 않는 원인 미상의 버그가 있다.
 - 위 세 가지 때문에 장애물 회피는 실제 센서 대신 오도메트리 거리 계산으로, Nav2는 SLAM/AMCL 대신 사전 제작 지도 + 항등 변환으로 대체했다.

@@ -13,6 +13,7 @@ ros-jazzy-xacro \
 ros-jazzy-geometry-msgs \
 ros-jazzy-navigation2 \
 ros-jazzy-nav2-bringup \
+ros-jazzy-foxglove-bridge \
 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

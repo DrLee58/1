@@ -58,6 +58,11 @@ def generate_launch_description():
             '/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
+            '/world/empty_world/model/physical_ai_amr/joint_state'
+            '@sensor_msgs/msg/JointState[gz.msgs.Model',
+        ],
+        remappings=[
+            ('/world/empty_world/model/physical_ai_amr/joint_state', '/joint_states'),
         ],
     )
 
