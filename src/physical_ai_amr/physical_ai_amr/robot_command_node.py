@@ -1,6 +1,7 @@
 import math
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
@@ -33,6 +34,11 @@ class RobotCommandNode(Node):
     # Keep the robot patrolling near the origin instead of wandering off forever.
     PATROL_RADIUS = 4.0
 
+    # If Nav2 can't complete a goal (e.g. the robot is outside the known map),
+    # it can fail instantly - without this, a failed patrol-edge return would
+    # retry every odom message and spam the action server forever.
+    NAV_RETRY_COOLDOWN = rclpy.duration.Duration(seconds=3.0)
+
     def __init__(self):
         super().__init__('robot_command_node')
 
@@ -60,6 +66,7 @@ class RobotCommandNode(Node):
 
         self.avoiding_until = None
         self.navigating = False
+        self.nav_retry_until = None
 
         self.timer = self.create_timer(
             0.1,
@@ -84,6 +91,8 @@ class RobotCommandNode(Node):
             return
 
         if math.hypot(x, y) > self.PATROL_RADIUS:
+            if self.nav_retry_until is not None and self.get_clock().now() < self.nav_retry_until:
+                return
             self.get_logger().info('Patrol edge reached, returning to origin via Nav2')
             origin = PoseStamped()
             origin.header.frame_id = 'map'
@@ -116,14 +125,30 @@ class RobotCommandNode(Node):
         if not goal_handle.accepted:
             self.get_logger().error('Nav2 rejected the goal, resuming patrol')
             self.navigating = False
+            self._on_nav_failure()
             return
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.nav_result_callback)
 
     def nav_result_callback(self, future):
-        self.get_logger().info('Nav2 goal finished, resuming patrol')
+        if future.result().status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info('Nav2 goal finished, resuming patrol')
+            self.nav_retry_until = None
+        else:
+            self.get_logger().warn(
+                f'Nav2 goal did not succeed (status={future.result().status}), '
+                f'resuming patrol after a cooldown'
+            )
+            self._on_nav_failure()
         self.navigating = False
+
+    def _on_nav_failure(self):
+        # Don't just drive straight ahead while waiting to retry - that would
+        # carry the robot further from anywhere Nav2 can reach. Fall back to
+        # the same local backup+turn used for obstacles.
+        self.nav_retry_until = self.get_clock().now() + self.NAV_RETRY_COOLDOWN
+        self.avoiding_until = self.get_clock().now() + self.AVOID_DURATION
 
     def publish_command(self):
         if self.navigating:

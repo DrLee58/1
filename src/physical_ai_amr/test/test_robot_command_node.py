@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import rclpy
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
@@ -63,6 +64,24 @@ class TestPatrolAvoidance:
         goal = send_mock.call_args.args[0]
         assert goal.pose.pose.position.x == 0.0
         assert goal.pose.pose.position.y == 0.0
+
+    def test_patrol_edge_skipped_during_nav_retry_cooldown(self, node):
+        node.nav_retry_until = node.get_clock().now() + Duration(seconds=5.0)
+
+        with patch.object(node.nav_client, 'wait_for_server') as wait_mock:
+            node.odom_callback(make_odom(RobotCommandNode.PATROL_RADIUS + 1.0, 0.0))
+
+        wait_mock.assert_not_called()
+
+    def test_patrol_edge_retried_after_cooldown_expires(self, node):
+        node.nav_retry_until = node.get_clock().now() - Duration(seconds=1.0)
+        fake_future = MagicMock()
+
+        with patch.object(node.nav_client, 'wait_for_server', return_value=True), \
+                patch.object(node.nav_client, 'send_goal_async', return_value=fake_future):
+            node.odom_callback(make_odom(RobotCommandNode.PATROL_RADIUS + 1.0, 0.0))
+
+        assert node.navigating is True
 
     def test_no_new_avoidance_while_already_avoiding(self, node):
         node.avoiding_until = node.get_clock().now() + Duration(seconds=5.0)
@@ -148,6 +167,8 @@ class TestNav2Handoff:
         node.nav_goal_response_callback(future)
 
         assert node.navigating is False
+        assert node.nav_retry_until is not None
+        assert node.avoiding_until is not None
 
     def test_nav_goal_accepted_awaits_result(self, node):
         node.navigating = True
@@ -178,9 +199,24 @@ class TestNav2Handoff:
         assert goal.pose.pose.orientation.z == 0.7071
         assert goal.pose.pose.orientation.w == 0.7071
 
-    def test_nav_result_resumes_patrol(self, node):
+    def test_nav_result_success_resumes_patrol(self, node):
         node.navigating = True
+        node.nav_retry_until = node.get_clock().now() + Duration(seconds=5.0)
+        future = MagicMock()
+        future.result.return_value = MagicMock(status=GoalStatus.STATUS_SUCCEEDED)
 
-        node.nav_result_callback(MagicMock())
+        node.nav_result_callback(future)
 
         assert node.navigating is False
+        assert node.nav_retry_until is None
+
+    def test_nav_result_failure_sets_retry_cooldown_and_fallback_avoidance(self, node):
+        node.navigating = True
+        future = MagicMock()
+        future.result.return_value = MagicMock(status=GoalStatus.STATUS_ABORTED)
+
+        node.nav_result_callback(future)
+
+        assert node.navigating is False
+        assert node.nav_retry_until is not None
+        assert node.avoiding_until is not None
